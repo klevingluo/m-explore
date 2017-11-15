@@ -50,10 +50,11 @@ static inline cv::Ptr<cv::detail::FeaturesFinder>
 chooseFeatureFinder(FeatureType type)
 {
   switch (type) {
+    //changed by mee oops
     case FeatureType::AKAZE:
-      return cv::makePtr<cv::detail::AKAZEFeaturesFinder>();
-    case FeatureType::ORB:
       return cv::makePtr<cv::detail::OrbFeaturesFinder>();
+    case FeatureType::ORB:
+      return cv::makePtr<cv::detail::AKAZEFeaturesFinder>();
     case FeatureType::SURF:
       return cv::makePtr<cv::detail::SurfFeaturesFinder>();
   }

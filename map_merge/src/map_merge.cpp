@@ -36,7 +36,6 @@
  *********************************************************************/
 
 #include <thread>
-
 #include <map_merge/map_merge.h>
 #include <ros/assert.h>
 #include <ros/console.h>
@@ -128,7 +127,7 @@ void MapMerge::topicSubscribing()
         [this, &subscription](const nav_msgs::OccupancyGrid::ConstPtr& msg) {
           fullMapUpdate(msg, subscription);
         });
-    ROS_INFO("Subscribing to MAP updates topic: %s.",
+    ROS_INFO("Suscribing to MAP updates topic: %s.",
              map_updates_topic.c_str());
     subscription.map_updates_sub =
         node_.subscribe<map_msgs::OccupancyGridUpdate>(

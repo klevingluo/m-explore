@@ -1,4 +1,4 @@
-/*********************************************************************
+/********************************************************************
  *
  * Software License Agreement (BSD License)
  *
@@ -39,157 +39,193 @@
 #include <combine_grids/merging_pipeline.h>
 #include <ros/assert.h>
 #include <ros/console.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include <opencv2/stitching/detail/matchers.hpp>
 #include <opencv2/stitching/detail/motion_estimators.hpp>
 #include "estimation_internal.h"
 
 namespace combine_grids
 {
-bool MergingPipeline::estimateTransforms(FeatureType feature_type,
-                                         double confidence)
-{
-  std::vector<cv::detail::ImageFeatures> image_features;
-  std::vector<cv::detail::MatchesInfo> pairwise_matches;
-  std::vector<cv::detail::CameraParams> transforms;
-  std::vector<int> good_indices;
-  // TODO investigate value translation effect on features
-  cv::Ptr<cv::detail::FeaturesFinder> finder =
+  bool MergingPipeline::estimateTransforms(FeatureType feature_type,
+      double confidence)
+  {
+    std::vector<cv::detail::ImageFeatures> image_features;
+    std::vector<cv::detail::MatchesInfo> pairwise_matches;
+    std::vector<cv::detail::CameraParams> transforms;
+    std::vector<int> good_indices;
+    // TODO investigate value translation effect on features
+    cv::Ptr<cv::detail::FeaturesFinder> finder =
       internal::chooseFeatureFinder(feature_type);
-  cv::Ptr<cv::detail::FeaturesMatcher> matcher =
+    cv::Ptr<cv::detail::FeaturesMatcher> matcher =
       cv::makePtr<cv::detail::AffineBestOf2NearestMatcher>();
-  cv::Ptr<cv::detail::Estimator> estimator =
+    cv::Ptr<cv::detail::Estimator> estimator =
       cv::makePtr<cv::detail::AffineBasedEstimator>();
-  cv::Ptr<cv::detail::BundleAdjusterBase> adjuster =
+    cv::Ptr<cv::detail::BundleAdjusterBase> adjuster =
       cv::makePtr<cv::detail::BundleAdjusterAffinePartial>();
 
-  if (images_.empty()) {
+    if (images_.empty()) {
+      return true;
+    }
+
+    /* find features in images */
+    ROS_DEBUG("computing features");
+    image_features.reserve(images_.size());
+    for (const cv::Mat& image : images_) {
+      image_features.emplace_back();
+      if (!image.empty()) {
+        (*finder)(image, image_features.back());
+      }
+    }
+    finder->collectGarbage();
+
+    /* find corespondent features */
+    ROS_DEBUG("pairwise matching features");
+    (*matcher)(image_features, pairwise_matches);
+    matcher->collectGarbage();
+
+#ifndef NDEBUG
+    internal::writeDebugMatchingInfo(images_, image_features, pairwise_matches);
+#endif
+
+    /* use only matches that has enough confidence. leave out matches that are not
+     * connected (small components) */
+    ROS_INFO("number of images: %lu", images_.size());
+    ROS_INFO("size of graph: %lu", pairwise_matches.size());
+    ROS_INFO("confidence: %f", confidence);
+
+    // keep 0, since it is the local map, then keep all others that are close
+    good_indices = std::vector<int>();
+    good_indices.push_back(0);
+    // walk down the diagonal and keep things that are high enough confidence
+    for (int i = 1; i < images_.size(); i++)
+    {
+      ROS_WARN("confidence: %f", pairwise_matches[i + i*images_.size()].confidence);
+      if (pairwise_matches[i + i*images_.size()].confidence > 0.32)
+      {
+        good_indices.push_back(i);
+      }
+    }
+    good_indices.push_back(1);
+
+    ROS_INFO("connected component size: %lu", good_indices.size());
+
+    /* estimate transform */
+    ROS_DEBUG("calculating transforms in global reference frame");
+    // note: currently used estimator never fails
+    if (!(*estimator)(image_features, pairwise_matches, transforms)) {
+      return false;
+    }
+
+    /* levmarq optimization */
+    // openCV just accepts float transforms
+    for (auto& transform : transforms) {
+      transform.R.convertTo(transform.R, CV_32F);
+    }
+    ROS_DEBUG("optimizing global transforms");
+    adjuster->setConfThresh(confidence);
+    if (!(*adjuster)(image_features, pairwise_matches, transforms)) {
+      ROS_WARN("Bundle adjusting failed. Could not estimate transforms.");
+      return false;
+    }
+
+    transforms_.clear();
+    transforms_.resize(images_.size());
+    size_t i = 0;
+    for (auto& j : good_indices) {
+      // we want to work with transforms as doubles
+      transforms[i].R.convertTo(transforms_[static_cast<size_t>(j)], CV_64F);
+      ++i;
+
+      std::cout << "M = " << std::endl << " "  << transforms_[static_cast<size_t>(j)] << std::endl << std::endl;
+    }
+
     return true;
   }
 
-  /* find features in images */
-  ROS_DEBUG("computing features");
-  image_features.reserve(images_.size());
-  for (const cv::Mat& image : images_) {
-    image_features.emplace_back();
-    if (!image.empty()) {
-      (*finder)(image, image_features.back());
-    }
-  }
-  finder->collectGarbage();
+  nav_msgs::OccupancyGrid::Ptr MergingPipeline::composeGrids()
+  {
+    ROS_ASSERT(images_.size() == transforms_.size());
+    ROS_ASSERT(images_.size() == grids_.size());
 
-  /* find corespondent features */
-  ROS_DEBUG("pairwise matching features");
-  (*matcher)(image_features, pairwise_matches);
-  matcher->collectGarbage();
-
-#ifndef NDEBUG
-  internal::writeDebugMatchingInfo(images_, image_features, pairwise_matches);
-#endif
-
-  /* use only matches that has enough confidence. leave out matches that are not
-   * connected (small components) */
-  good_indices = cv::detail::leaveBiggestComponent(
-      image_features, pairwise_matches, static_cast<float>(confidence));
-
-  /* estimate transform */
-  ROS_DEBUG("calculating transforms in global reference frame");
-  // note: currently used estimator never fails
-  if (!(*estimator)(image_features, pairwise_matches, transforms)) {
-    return false;
-  }
-
-  /* levmarq optimization */
-  // openCV just accepts float transforms
-  for (auto& transform : transforms) {
-    transform.R.convertTo(transform.R, CV_32F);
-  }
-  ROS_DEBUG("optimizing global transforms");
-  adjuster->setConfThresh(confidence);
-  if (!(*adjuster)(image_features, pairwise_matches, transforms)) {
-    ROS_WARN("Bundle adjusting failed. Could not estimate transforms.");
-    return false;
-  }
-
-  transforms_.clear();
-  transforms_.resize(images_.size());
-  size_t i = 0;
-  for (auto& j : good_indices) {
-    // we want to work with transforms as doubles
-    transforms[i].R.convertTo(transforms_[static_cast<size_t>(j)], CV_64F);
-    ++i;
-  }
-
-  return true;
-}
-
-nav_msgs::OccupancyGrid::Ptr MergingPipeline::composeGrids()
-{
-  ROS_ASSERT(images_.size() == transforms_.size());
-  ROS_ASSERT(images_.size() == grids_.size());
-
-  if (images_.empty()) {
-    return nullptr;
-  }
-
-  ROS_DEBUG("warping grids");
-  internal::GridWarper warper;
-  std::vector<cv::Mat> imgs_warped;
-  imgs_warped.reserve(images_.size());
-  std::vector<cv::Rect> rois;
-  rois.reserve(images_.size());
-
-  for (size_t i = 0; i < images_.size(); ++i) {
-    if (!transforms_[i].empty() && !images_[i].empty()) {
-      imgs_warped.emplace_back();
-      rois.emplace_back(
-          warper.warp(images_[i], transforms_[i], imgs_warped.back()));
-    }
-  }
-
-  if (imgs_warped.empty()) {
-    return nullptr;
-  }
-
-  ROS_DEBUG("compositing result grid");
-  nav_msgs::OccupancyGrid::Ptr result;
-  internal::GridCompositor compositor;
-  result = compositor.compose(imgs_warped, rois);
-  result->info.map_load_time = ros::Time::now();
-  // TODO is this correct?
-  result->info.resolution = grids_[0]->info.resolution;
-
-  return result;
-}
-
-std::vector<geometry_msgs::Transform> MergingPipeline::getTransforms() const
-{
-  std::vector<geometry_msgs::Transform> result;
-  result.reserve(transforms_.size());
-
-  for (auto& transform : transforms_) {
-    if (transform.empty()) {
-      result.emplace_back();
-      continue;
+    if (images_.empty()) {
+      return nullptr;
     }
 
-    ROS_ASSERT(transform.type() == CV_64F);
-    geometry_msgs::Transform ros_transform;
-    ros_transform.translation.x = transform.at<double>(0, 2);
-    ros_transform.translation.y = transform.at<double>(1, 2);
-    ros_transform.translation.z = 0.;
+    ROS_DEBUG("warping grids");
+    internal::GridWarper warper;
+    std::vector<cv::Mat> imgs_warped;
+    imgs_warped.reserve(images_.size());
+    std::vector<cv::Rect> rois;
+    rois.reserve(images_.size());
 
-    // our rotation is in fact only 2D, thus quaternion can be simplified
-    double a = transform.at<double>(0, 0);
-    double b = transform.at<double>(1, 0);
-    ros_transform.rotation.w = std::sqrt(2. + 2. * a) * 0.5;
-    ros_transform.rotation.x = 0.;
-    ros_transform.rotation.y = 0.;
-    ros_transform.rotation.z = std::copysign(std::sqrt(2. - 2. * a) * 0.5, b);
+    std::vector<double> H;
 
-    result.push_back(ros_transform);
+    for (size_t i = 0; i < images_.size(); ++i) {
+      if (!transforms_[i].empty() && !images_[i].empty()) {
+        imgs_warped.emplace_back();
+        std::vector<double> H2;
+        if (i == 0)
+        {
+          rois.emplace_back(
+              warper.warp(images_[i], transforms_[i], imgs_warped.back(), H));
+        } else {
+          rois.emplace_back(
+              warper.warp(images_[i], transforms_[i], imgs_warped.back(), H2));
+        }
+      }
+    }
+
+    if (imgs_warped.empty()) {
+      return nullptr;
+    }
+
+    ROS_DEBUG("compositing result grid");
+    nav_msgs::OccupancyGrid::Ptr result;
+    internal::GridCompositor compositor;
+    cv::Point offset;
+    result = compositor.compose(imgs_warped, rois, offset);
+    result->info.map_load_time = ros::Time::now();
+
+    // TODO is this correct? I think so
+    result->info.resolution = grids_[0]->info.resolution;
+
+    // sets the coordinate to be the same as the main mapper
+    result->info.origin = grids_[0]->info.origin;
+    result->info.origin.position.x -= offset.x*grids_[0]->info.resolution;
+    result->info.origin.position.y -= offset.y*grids_[0]->info.resolution;
+
+    return result;
   }
 
-  return result;
-}
+  std::vector<geometry_msgs::Transform> MergingPipeline::getTransforms() const
+  {
+    std::vector<geometry_msgs::Transform> result;
+    result.reserve(transforms_.size());
+
+    for (auto& transform : transforms_) {
+      if (transform.empty()) {
+        result.emplace_back();
+        continue;
+      }
+
+      ROS_ASSERT(transform.type() == CV_64F);
+      geometry_msgs::Transform ros_transform;
+      ros_transform.translation.x = transform.at<double>(0, 2);
+      ros_transform.translation.y = transform.at<double>(1, 2);
+      ros_transform.translation.z = 0.;
+
+      // our rotation is in fact only 2D, thus quaternion can be simplified
+      double a = transform.at<double>(0, 0);
+      double b = transform.at<double>(1, 0);
+      ros_transform.rotation.w = std::sqrt(2. + 2. * a) * 0.5;
+      ros_transform.rotation.x = 0.;
+      ros_transform.rotation.y = 0.;
+      ros_transform.rotation.z = std::copysign(std::sqrt(2. - 2. * a) * 0.5, b);
+
+      result.push_back(ros_transform);
+    }
+
+    return result;
+  }
 
 }  // namespace combine_grids

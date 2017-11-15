@@ -45,7 +45,7 @@ namespace combine_grids
 namespace internal
 {
 cv::Rect GridWarper::warp(const cv::Mat& grid, const cv::Mat& transform,
-                          cv::Mat& warped_grid)
+                          cv::Mat& warped_grid, std::vector<double>& origin)
 {
   ROS_ASSERT(transform.type() == CV_64F);
   cv::Mat H;
@@ -54,6 +54,10 @@ cv::Rect GridWarper::warp(const cv::Mat& grid, const cv::Mat& transform,
   // shift top left corner for warp affine (otherwise the image is cropped)
   H.at<double>(0, 2) -= roi.tl().x;
   H.at<double>(1, 2) -= roi.tl().y;
+
+  origin.push_back(roi.tl().x);
+  origin.push_back(roi.tl().y);
+
   warpAffine(grid, warped_grid, H, roi.size(), cv::INTER_NEAREST,
              cv::BORDER_CONSTANT,
              cv::Scalar::all(255) /* this is -1 for signed char */);

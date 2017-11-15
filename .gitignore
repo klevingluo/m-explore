@@ -1,4 +1,13 @@
+# backup files left over from vim 
+**.swp
+**.swo
+
+# undo files
+**un~
+
+# vim files, somehow
+**~
+
 *sublime-*
 *.svg
 *.xcf
-

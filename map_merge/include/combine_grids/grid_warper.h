@@ -47,7 +47,7 @@ class GridWarper
 {
 public:
   cv::Rect warp(const cv::Mat& grid, const cv::Mat& transform,
-                cv::Mat& warped_grid);
+                cv::Mat& warped_grid, std::vector<double>& origin);
 
 private:
   cv::Rect warpRoi(const cv::Mat& grid, const cv::Mat& transform);

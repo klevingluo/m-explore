@@ -45,7 +45,7 @@ namespace combine_grids
 namespace internal
 {
 nav_msgs::OccupancyGrid::Ptr GridCompositor::compose(
-    const std::vector<cv::Mat>& grids, const std::vector<cv::Rect>& rois)
+    const std::vector<cv::Mat>& grids, const std::vector<cv::Rect>& rois, cv::Point& offset)
 {
   ROS_ASSERT(grids.size() == rois.size());
 
@@ -67,6 +67,7 @@ nav_msgs::OccupancyGrid::Ptr GridCompositor::compose(
   // create view for opencv pointing to newly allocated grid
   cv::Mat result(dst_roi.size(), CV_8S, result_grid->data.data());
 
+  offset = corners[0] - dst_roi.tl(), sizes[0];
   for (size_t i = 0; i < grids.size(); ++i) {
     // we need to compensate global offset
     cv::Rect roi = cv::Rect(corners[i] - dst_roi.tl(), sizes[i]);
