@@ -46,8 +46,10 @@
 
 namespace combine_grids
 {
-  bool MergingPipeline::estimateTransforms(FeatureType feature_type,
-      double confidence)
+  bool MergingPipeline::estimateTransforms(
+      double confidence,
+      FeatureType feature_type
+      )
   {
     std::vector<cv::detail::ImageFeatures> image_features;
     std::vector<cv::detail::MatchesInfo> pairwise_matches;
@@ -105,7 +107,6 @@ namespace combine_grids
         good_indices.push_back(i);
       }
     }
-    good_indices.push_back(1);
 
     ROS_INFO("connected component size: %lu", good_indices.size());
 

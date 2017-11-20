@@ -57,8 +57,8 @@ class MergingPipeline
 public:
   template <typename InputIt>
   void feed(InputIt grids_begin, InputIt grids_end);
-  bool estimateTransforms(FeatureType feature = FeatureType::AKAZE,
-                          double confidence = 1.0);
+  bool estimateTransforms(double confidence = 1.0, 
+      FeatureType feature = FeatureType::AKAZE);
   nav_msgs::OccupancyGrid::Ptr composeGrids();
 
   std::vector<geometry_msgs::Transform> getTransforms() const;

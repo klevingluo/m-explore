@@ -86,7 +86,7 @@ private:
   // maps robots namespaces to maps. does not own
   std::unordered_map<std::string, MapSubscription*> robots_;
   // owns maps -- iterator safe
-  std::forward_list<MapSubscription> subscriptions_;
+  std::list<MapSubscription> subscriptions_;
   size_t subscriptions_size_;
   boost::shared_mutex subscriptions_mutex_;
   combine_grids::MergingPipeline pipeline_;
@@ -110,6 +110,7 @@ public:
   void executeposeEstimation();
 
   void topicSubscribing();
+  void subscribeRobot(std::string robot_name, geometry_msgs::Transform init_pose);
   void mapMerging();
   /**
    * @brief Estimates initial positions of grids
