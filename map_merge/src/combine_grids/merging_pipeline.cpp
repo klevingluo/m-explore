@@ -99,10 +99,10 @@ namespace combine_grids
     good_indices = std::vector<int>();
     good_indices.push_back(0);
     // walk down the diagonal and keep things that are high enough confidence
-    for (int i = 1; i < images_.size(); i++)
+    for (size_t i = 1; i < images_.size(); i++)
     {
-      ROS_WARN("confidence: %f", pairwise_matches[i + i*images_.size()].confidence);
-      if (pairwise_matches[i + i*images_.size()].confidence > 0.32)
+      ROS_WARN("confidence: %f", pairwise_matches[i*images_.size()].confidence);
+      if (pairwise_matches[i*images_.size()].confidence > 0.32)
       {
         good_indices.push_back(i);
       }
